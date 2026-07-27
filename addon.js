@@ -2,7 +2,7 @@ const express = require("express");
 const path    = require("path");
 const crypto  = require("crypto");
 const fs      = require("fs");
-const { parseM3U, groupContent, cleanTitleForTMDB } = require("./parse-m3u");
+const { parseM3U, groupContent, cleanTitleForTMDB, slugify } = require("./parse-m3u");
 
 const app  = express();
 const PORT = process.env.PORT || 7000;
@@ -192,6 +192,18 @@ async function initData(config, configId) {
   console.log(`🔄 Cargando listas...`);
   globalData.ready = false;
   const { movies, series } = await loadList(config.m3uUrls);
+
+  const movieGroupMap = {};
+  const seriesGroupMap = {};
+  for (const m of movies) {
+    const g = m.genres?.[0];
+    if (g) movieGroupMap[slugify(g)] = g;
+  }
+  for (const s of Object.values(series)) {
+    const g = s.genres?.[0];
+    if (g) seriesGroupMap[slugify(g)] = g;
+  }
+
   globalData = {
     movies,
     series,
@@ -200,7 +212,9 @@ async function initData(config, configId) {
     seriesImdbIndex: {},
     apiKey:          config.tmdbApiKey || null,
     configId,
-    ready:           true
+    ready:           true,
+    movieGroupMap,
+    seriesGroupMap
   };
   console.log(`✅ Datos cargados y listos`);
   prefetchTMDB(globalData).catch(err =>
@@ -279,6 +293,33 @@ app.get("/:configId/manifest.json", (req, res) => {
   const config = getConfig(req.params.configId);
   if (!config) return res.status(404).json({ error: "Config not found. Please reconfigure the addon." });
   const baseUrl = `${req.protocol}://${req.get("host")}`;
+
+  const catalogs = [
+    {
+      type: "movie", id: "m3u_movies", name: "Mis Películas",
+      extra: [{ name: "search", isRequired: false }, { name: "skip", isRequired: false }]
+    },
+    {
+      type: "series", id: "m3u_series", name: "Mis Series",
+      extra: [{ name: "search", isRequired: false }, { name: "skip", isRequired: false }]
+    }
+  ];
+
+  if (globalData.ready && globalData.configId === req.params.configId) {
+    for (const [slug, name] of Object.entries(globalData.movieGroupMap || {})) {
+      catalogs.push({
+        type: "movie", id: `group_movie_${slug}`, name,
+        extra: [{ name: "skip", isRequired: false }]
+      });
+    }
+    for (const [slug, name] of Object.entries(globalData.seriesGroupMap || {})) {
+      catalogs.push({
+        type: "series", id: `group_series_${slug}`, name,
+        extra: [{ name: "skip", isRequired: false }]
+      });
+    }
+  }
+
   res.json({
     id:          "com.m3uiptv.public",
     version:     "1.1.4",
@@ -287,16 +328,7 @@ app.get("/:configId/manifest.json", (req, res) => {
     logo:        LOGO,
     resources:   ["catalog", "stream", "meta"],
     types:       ["movie", "series"],
-    catalogs: [
-      {
-        type: "movie", id: "m3u_movies", name: "Mis Películas",
-        extra: [{ name: "search", isRequired: false }, { name: "skip", isRequired: false }]
-      },
-      {
-        type: "series", id: "m3u_series", name: "Mis Series",
-        extra: [{ name: "search", isRequired: false }, { name: "skip", isRequired: false }]
-      }
-    ],
+    catalogs,
     behaviorHints: { configurable: true, configureUrl: `${baseUrl}/configure` },
     stremioAddonsConfig: {
       issuer:    "https://stremio-addons.net",
@@ -330,6 +362,30 @@ async function handleCatalog(req, res) {
     }
     if (type === "series" && id === "m3u_series") {
       let results = Object.values(globalData.series);
+      if (search) results = results.filter(s => normalize(s.title).includes(search));
+      return res.json({
+        metas: results.slice(skip, skip + PAGE).map(s => ({
+          id: s.id, type: "series", name: s.title, poster: s.poster
+        }))
+      });
+    }
+    if (type === "movie" && id.startsWith("group_movie_")) {
+      const slug = id.slice("group_movie_".length);
+      const groupName = globalData.movieGroupMap?.[slug];
+      if (!groupName) return res.json({ metas: [] });
+      let results = globalData.movies.filter(m => m.genres?.[0] === groupName);
+      if (search) results = results.filter(m => normalize(m.title).includes(search));
+      return res.json({
+        metas: results.slice(skip, skip + PAGE).map(m => ({
+          id: m.id, type: "movie", name: m.title, poster: m.poster
+        }))
+      });
+    }
+    if (type === "series" && id.startsWith("group_series_")) {
+      const slug = id.slice("group_series_".length);
+      const groupName = globalData.seriesGroupMap?.[slug];
+      if (!groupName) return res.json({ metas: [] });
+      let results = Object.values(globalData.series).filter(s => s.genres?.[0] === groupName);
       if (search) results = results.filter(s => normalize(s.title).includes(search));
       return res.json({
         metas: results.slice(skip, skip + PAGE).map(s => ({

@@ -302,4 +302,4 @@ function pad(n) {
   return String(n).padStart(2, "0");
 }
 
-module.exports = { parseM3U, groupContent, cleanTitleForTMDB };
+module.exports = { parseM3U, groupContent, cleanTitleForTMDB, slugify };
