@@ -42,6 +42,10 @@ const MOVIE_GROUP_KEYWORDS = [
   "latino", "castellano", "español", "dubbed"
 ];
 
+// Prefijos exactos de grupo para clasificación directa
+const MOVIES_GROUP_PREFIX = "movies - ";
+const SERIES_GROUP_PREFIX = "series - ";
+
 // ─────────────────────────────────────────────
 // KEYWORDS grupos que son CLARAMENTE canales de TV
 // Solo los muy específicos — no palabras que aparezcan en títulos
@@ -177,17 +181,27 @@ function classifyItem(item) {
 
   if (epMatch) return { type: "series", match: epMatch };
 
-  // 2. Grupo claramente de canal de TV
+  // 2. Prefijo "Movies - " → película
+  if (groupLow.startsWith(MOVIES_GROUP_PREFIX)) {
+    return { type: "movie" };
+  }
+
+  // 3. Prefijo "Series - " → serie
+  if (groupLow.startsWith(SERIES_GROUP_PREFIX)) {
+    return { type: "series", match: null };
+  }
+
+  // 4. Grupo claramente de canal de TV
   if (CHANNEL_GROUP_KEYWORDS.some(kw => groupLow.includes(kw))) {
     return { type: "channel" };
   }
 
-  // 3. Grupo claramente de serie
+  // 5. Grupo claramente de serie
   if (SERIES_GROUP_KEYWORDS.some(kw => groupLow.includes(kw))) {
     return { type: "series", match: null };
   }
 
-  // 4. Grupo claramente de película
+  // 6. Grupo claramente de película
   if (MOVIE_GROUP_KEYWORDS.some(kw => groupLow.includes(kw))) {
     return { type: "movie" };
   }
